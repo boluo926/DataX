@@ -166,7 +166,15 @@ public final class Key {
     }
 
     public static Integer getESVersion(Configuration conf) {
-        return conf.getInt("esVersion");
+        Integer version = conf.getInt("esVersion");
+        if (version == null) {
+            // 尝试其他可能的配置参数名
+            version = conf.getInt("es.version");
+        }
+        if (version == null) {
+            version = conf.getInt("elasticsearch.version");
+        }
+        return version;
     }
     
     public static String getMasterTimeout(Configuration conf) {

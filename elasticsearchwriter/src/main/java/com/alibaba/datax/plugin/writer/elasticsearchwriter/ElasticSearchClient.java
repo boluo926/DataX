@@ -125,8 +125,16 @@ public class ElasticSearchClient {
             ClusterInfoResult result = execute(new ClusterInfo.Builder().build());
             LOGGER.info("ClusterInfoResult: {}", result.getJsonString());
             return result.isGreaterOrEqualThan7();
-        }catch(Exception e) {
-            LOGGER.warn(e.getMessage());
+        } catch(Exception e) {
+            LOGGER.warn("Failed to detect ES version from cluster info: {}, trying fallback detection", e.getMessage());
+            // 降级方案：尝试通过配置检测
+            Integer esVersion = Key.getESVersion(this.conf);
+            if (esVersion != null) {
+                boolean result = esVersion >= 7;
+                LOGGER.info("Using configured esVersion: {}, isGreaterOrEqualThan7: {}", esVersion, result);
+                return result;
+            }
+            LOGGER.warn("No esVersion configured, assuming ES 6.x compatible mode");
             return false;
         }
     }
@@ -155,7 +163,9 @@ public class ElasticSearchClient {
                                Object mappings, String settings,
                                boolean dynamic, boolean isGreaterOrEqualThan7) throws Exception {
         JestResult rst;
-        if (!indicesExists(indexName)) {
+        boolean indexAlreadyExists = indicesExists(indexName);
+
+        if (!indexAlreadyExists) {
             LOGGER.info("create index {}", indexName);
             rst = execute(
                     new CreateIndex.Builder(indexName)
@@ -168,7 +178,7 @@ public class ElasticSearchClient {
                 LOGGER.warn("CreateIndex got ResponseCode: {}, ErrorMessage: {}", rst.getResponseCode(), rst.getErrorMessage());
                 if (getStatus(rst) == 400) {
                     LOGGER.info(String.format("index {} already exists", indexName));
-                    return true;
+                    indexAlreadyExists = true;
                 } else {
                     return false;
                 }
@@ -181,6 +191,14 @@ public class ElasticSearchClient {
             LOGGER.info("dynamic is true, ignore mappings");
             return true;
         }
+
+        // 如果索引已存在，跳过 mapping 更新以避免与现有 mapping 冲突
+        // ES 不允许修改已有字段的某些参数（如 format、type 等）
+        if (indexAlreadyExists) {
+            LOGGER.info("index {} already exists, skip mapping update to avoid conflicts", indexName);
+            return true;
+        }
+
         LOGGER.info("create mappings for {}  {}", indexName, mappings);
         //如果大于7.x，mapping的PUT请求URI中不能带type，并且mapping设置中不能带有嵌套结构
         if (isGreaterOrEqualThan7) {
@@ -276,12 +294,21 @@ public class ElasticSearchClient {
         JSONObject indexMappingInJson = JSON.parseObject(indexMapping);
         List<String> paths = Arrays.asList(indexName, "mappings");
         JSONObject properties = JsonPathUtil.getJsonObject(paths, indexMappingInJson);
-        JSONObject propertiesParent = properties;
-        if (StringUtils.isNotBlank(typeName) && properties.containsKey(typeName)) {
-            propertiesParent = (JSONObject) properties.get(typeName);
+
+        // ES 7.x+ 格式：mappings 直接包含 properties
+        if (properties.containsKey("properties")) {
+            JSONObject mapping = (JSONObject) properties.get("properties");
+            return JSON.toJSONString(mapping);
         }
-        JSONObject mapping = (JSONObject) propertiesParent.get("properties");
-        return JSON.toJSONString(mapping);
+        // ES 6.x- 格式：mappings.typeName.properties
+        else if (StringUtils.isNotBlank(typeName) && properties.containsKey(typeName)) {
+            JSONObject typeMapping = (JSONObject) properties.get(typeName);
+            JSONObject mapping = (JSONObject) typeMapping.get("properties");
+            return JSON.toJSONString(mapping);
+        }
+
+        throw DataXException.asDataXException(ElasticSearchWriterErrorCode.ES_MAPPINGS,
+            "Cannot extract mapping properties, unknown format: " + indexMapping);
     }
 
     public JestResult bulkInsert(Bulk.Builder bulk) throws Exception {

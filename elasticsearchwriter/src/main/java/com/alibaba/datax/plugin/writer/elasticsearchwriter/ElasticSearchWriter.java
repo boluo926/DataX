@@ -117,14 +117,27 @@ public class ElasticSearchWriter extends Writer {
             
             try {
                 RetryUtil.executeWithRetry(() -> {
-                    boolean isGreaterOrEqualThan7 = esClient.isGreaterOrEqualThan7();
-                    if (esVersion != null && esVersion >= 7) {
-                        isGreaterOrEqualThan7 = true;
+                    boolean isGreaterOrEqualThan7 = false;
+                    if (esVersion != null) {
+                        // 用户显式配置了版本，优先使用
+                        isGreaterOrEqualThan7 = (esVersion >= 7);
+                        LOGGER.info("Using configured ES version: {}, compatibility mode: {}",
+                            esVersion, isGreaterOrEqualThan7 ? "7.x+" : "6.x-");
+                    } else {
+                        // 自动检测
+                        try {
+                            isGreaterOrEqualThan7 = esClient.isGreaterOrEqualThan7();
+                            LOGGER.info("Auto-detected ES compatibility mode: {}",
+                                isGreaterOrEqualThan7 ? "7.x+" : "6.x-");
+                        } catch (Exception e) {
+                            LOGGER.warn("Auto-detect ES version failed: {}, assuming ES 6.x compatible mode", e.getMessage());
+                            isGreaterOrEqualThan7 = false;
+                        }
                     }
                     String mappings = genMappings(dstDynamic, typeName, isGreaterOrEqualThan7);
                     conf.set("isGreaterOrEqualThan7", isGreaterOrEqualThan7);
 
-                    
+
                     LOGGER.info(String.format("index:[%s], type:[%s], mappings:[%s]", indexName, typeName, mappings));
                     boolean isIndicesExists = esClient.indicesExists(indexName);
                     if (isIndicesExists) {
@@ -136,7 +149,7 @@ public class ElasticSearchWriter extends Writer {
                             LOGGER.warn("warn message: {}", e.getMessage());
                         }
                     }
-                    
+
                     if (Key.isTruncate(conf) && isIndicesExists) {
                         // 备份老的索引中的settings到缓存
                         try {
@@ -277,7 +290,13 @@ public class ElasticSearchWriter extends Writer {
                         columnItem.setJsonArray(false);
                     }
                     Map<String, Object> field = new HashMap<String, Object>();
-                    field.put("type", colTypeStr);
+                    // ES 7.x 不支持 string 类型，自动转换为 keyword
+                    String actualType = colTypeStr;
+                    if (isGreaterOrEqualThan7 && "string".equalsIgnoreCase(colTypeStr)) {
+                        actualType = "keyword";
+                        LOGGER.info("ES 7.x mode: converting 'string' type to 'keyword' for field: {}", colName);
+                    }
+                    field.put("type", actualType);
                     //https://www.elastic.co/guide/en/elasticsearch/reference/5.2/breaking_50_mapping_changes.html#_literal_index_literal_property
                     // https://www.elastic.co/guide/en/elasticsearch/guide/2.x/_deep_dive_on_doc_values.html#_disabling_doc_values
                     field.put("doc_values", jo.getBoolean("doc_values"));
@@ -286,6 +305,10 @@ public class ElasticSearchWriter extends Writer {
                     switch (colType) {
                         case STRING:
                             // 兼容string类型,ES5之前版本
+                            // ES 7.x 已转换为 keyword，应用 keyword 的配置
+                            if (isGreaterOrEqualThan7) {
+                                field.put("eager_global_ordinals", jo.getBoolean("eager_global_ordinals"));
+                            }
                             break;
                         case KEYWORD:
                             // https://www.elastic.co/guide/en/elasticsearch/reference/current/tune-for-search-speed.html#_warm_up_global_ordinals
