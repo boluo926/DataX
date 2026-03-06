@@ -264,11 +264,6 @@ public class CommonRdbmsWriter {
                             String.format("达梦数据库的 replace/update 模式需要表 %s 有主键。请检查表结构或使用 insert 模式。", this.table));
                 }
                 LOG.info("达梦数据库使用 MERGE INTO 模式，主键列: {}", StringUtils.join(this.primaryKeys, ", "));
-                // MERGE INTO 不支持批量操作，强制 batchSize=1
-                if (this.batchSize > 1) {
-                    LOG.warn("达梦数据库的 replace/update 模式使用 MERGE INTO 语法，不支持批量操作，自动将 batchSize 设置为 1");
-                    this.batchSize = 1;
-                }
             }
 
             int tableNumber = writerSliceConfig.getInt(
