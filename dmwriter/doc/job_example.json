@@ -1,0 +1,36 @@
+{
+    "job": {
+        "content": [{
+            "reader": {
+                "name": "streamreader",
+                "parameter": {
+                    "column": [
+                        {"value": "1", "type": "long"},
+                        {"value": "DataX测试", "type": "string"},
+                        {"value": "2023-01-01 00:00:00", "type": "date"}
+                    ],
+                    "sliceRecordCount": 100
+                }
+            },
+            "writer": {
+                "name": "dmwriter",
+                "parameter": {
+                    "username": "SYSDBA",
+                    "password": "SYSDBA",
+                    "writeMode": "insert",
+                    "column": ["id", "name", "create_time"],
+                    "connection": [{
+                        "jdbcUrl": "jdbc:dm://localhost:5236/DAMENG",
+                        "table": ["test_table"]
+                    }]
+                }
+            }
+        }],
+        "setting": {
+            "speed": {
+                "channel": 1,
+                "byte": -1
+            }
+        }
+    }
+}

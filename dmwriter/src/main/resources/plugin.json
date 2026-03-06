@@ -1,0 +1,6 @@
+{
+    "name": "dmwriter",
+    "class": "com.alibaba.datax.plugin.writer.dmwriter.DmWriter",
+    "description": "达梦数据库写入插件，支持 insert/replace/update 模式。DM8 专用。",
+    "developer": "datax-community"
+}

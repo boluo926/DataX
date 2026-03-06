@@ -199,6 +199,8 @@ public class CommonRdbmsWriter {
         protected String writeMode;
         protected boolean emptyAsNull;
         protected Triple<List<String>, List<Integer>, List<String>> resultSetMetaData;
+        // 达梦数据库需要主键列来生成 MERGE INTO 语句
+        protected List<String> primaryKeys;
 
         private int dumpRecordLimit = Constant.DEFAULT_DUMP_RECORD_LIMIT;
         private AtomicLong dumpRecordCount = new AtomicLong(0);
@@ -251,6 +253,23 @@ public class CommonRdbmsWriter {
 
             DBUtil.dealWithSessionConfig(connection, writerSliceConfig,
                     this.dataBaseType, BASIC_MESSAGE);
+
+            // 达梦数据库 replace/update 模式需要获取主键列来生成 MERGE INTO 语句
+            if (this.dataBaseType == DataBaseType.DM &&
+                    (writeMode.trim().toLowerCase().startsWith("replace") ||
+                     writeMode.trim().toLowerCase().startsWith("update"))) {
+                this.primaryKeys = WriterUtil.getPrimaryKeys(connection, this.table);
+                if (this.primaryKeys == null || this.primaryKeys.isEmpty()) {
+                    throw DataXException.asDataXException(DBUtilErrorCode.CONF_ERROR,
+                            String.format("达梦数据库的 replace/update 模式需要表 %s 有主键。请检查表结构或使用 insert 模式。", this.table));
+                }
+                LOG.info("达梦数据库使用 MERGE INTO 模式，主键列: {}", StringUtils.join(this.primaryKeys, ", "));
+                // MERGE INTO 不支持批量操作，强制 batchSize=1
+                if (this.batchSize > 1) {
+                    LOG.warn("达梦数据库的 replace/update 模式使用 MERGE INTO 语法，不支持批量操作，自动将 batchSize 设置为 1");
+                    this.batchSize = 1;
+                }
+            }
 
             int tableNumber = writerSliceConfig.getInt(
                     Constant.TABLE_NUMBER_MARK);
@@ -559,6 +578,15 @@ public class CommonRdbmsWriter {
         }
 
         private void calcWriteRecordSql() {
+            // 达梦数据库 replace/update 模式使用 MERGE INTO 语句
+            if (this.dataBaseType == DataBaseType.DM &&
+                    (writeMode.trim().toLowerCase().startsWith("replace") ||
+                     writeMode.trim().toLowerCase().startsWith("update"))) {
+                this.writeRecordSql = WriterUtil.buildMergeIntoSql(this.table, this.columns, this.primaryKeys);
+                LOG.info("达梦数据库使用 MERGE INTO 语句: {}", this.writeRecordSql);
+                return;
+            }
+
             if (!VALUE_HOLDER.equals(calcValueHolder(""))) {
                 List<String> valueHolders = new ArrayList<String>(columnNumber);
                 for (int i = 0; i < columns.size(); i++) {

@@ -90,8 +90,10 @@
 <!--        <module>databendwriter</module>-->
 <!--        <module>oraclewriter</module>-->
 <!--        <module>sqlserverwriter</module>-->
+<!--        <module>sqlserverwriter</module>-->
 <!--        <module>postgresqlwriter</module>-->
 <!--        <module>kingbaseeswriter</module>-->
+        <module>dmwriter</module>
 <!--        <module>adswriter</module>-->
 <!--        <module>oceanbasev10writer</module>-->
 <!--        <module>obhbasewriter</module>-->
@@ -131,7 +133,7 @@
 <!--        <module>neo4jwriter</module>-->
 <!--        <module>milvuswriter</module>-->
 <!--        &lt;!&ndash; common support module &ndash;&gt;-->
-<!--        <module>plugin-rdbms-util</module>-->
+        <module>plugin-rdbms-util</module>
 <!--        <module>plugin-unstructured-storage-util</module>-->
 <!--        <module>gaussdbreader</module>-->
 <!--        <module>gaussdbwriter</module>-->

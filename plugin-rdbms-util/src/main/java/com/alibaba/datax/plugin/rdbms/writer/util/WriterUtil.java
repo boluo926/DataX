@@ -14,6 +14,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.*;
 
@@ -165,6 +168,106 @@ public final class WriterUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * 获取表的主键列列表
+     *
+     * @param connection 数据库连接
+     * @param tableName 表名
+     * @return 主键列名列表
+     */
+    public static List<String> getPrimaryKeys(Connection connection, String tableName) {
+        List<String> primaryKeys = new ArrayList<String>();
+        try {
+            DatabaseMetaData metaData = connection.getMetaData();
+            ResultSet rs = metaData.getPrimaryKeys(null, null, tableName);
+            while (rs.next()) {
+                primaryKeys.add(rs.getString("COLUMN_NAME"));
+            }
+            rs.close();
+        } catch (SQLException e) {
+            LOG.warn("获取表 {} 的主键信息失败: {}", tableName, e.getMessage());
+        }
+        return primaryKeys;
+    }
+
+    /**
+     * 为达梦数据库构建 MERGE INTO SQL
+     * 达梦数据库使用 MERGE INTO 实现 replace/update 模式
+     *
+     * @param table 表名
+     * @param columns 列名列表
+     * @param primaryKeys 主键列名列表
+     * @return MERGE INTO SQL 语句
+     */
+    public static String buildMergeIntoSql(String table, List<String> columns, List<String> primaryKeys) {
+        if (primaryKeys == null || primaryKeys.isEmpty()) {
+            throw new IllegalArgumentException("达梦数据库的 replace/update 模式需要表有主键");
+        }
+
+        // 构建 USING 子句 - 使用 DUAL 表提供值
+        StringBuilder usingClause = new StringBuilder("(SELECT ");
+        for (int i = 0; i < columns.size(); i++) {
+            if (i > 0) {
+                usingClause.append(", ");
+            }
+            usingClause.append("? AS ").append(columns.get(i));
+        }
+        usingClause.append(" FROM DUAL) T2");
+
+        // 构建 ON 条件 - 基于主键列
+        StringBuilder onClause = new StringBuilder();
+        for (int i = 0; i < primaryKeys.size(); i++) {
+            if (i > 0) {
+                onClause.append(" AND ");
+            }
+            onClause.append("T1.").append(primaryKeys.get(i))
+                    .append(" = T2.").append(primaryKeys.get(i));
+        }
+
+        // 构建 UPDATE SET 子句 - 更新所有非主键列
+        StringBuilder updateSetClause = new StringBuilder();
+        for (int i = 0; i < columns.size(); i++) {
+            String column = columns.get(i);
+            // 跳过主键列（主键不需要更新）
+            if (primaryKeys.contains(column)) {
+                continue;
+            }
+            if (updateSetClause.length() > 0) {
+                updateSetClause.append(", ");
+            }
+            updateSetClause.append("T1.").append(column)
+                    .append(" = T2.").append(column);
+        }
+
+        // 构建 INSERT 子句
+        StringBuilder insertClause = new StringBuilder();
+        if (updateSetClause.length() > 0) {
+            insertClause.append("INSERT (").append(StringUtils.join(columns, ", "))
+                    .append(") VALUES (T2.")
+                    .append(StringUtils.join(columns, ", T2."))
+                    .append(")");
+        } else {
+            // 如果所有列都是主键，则只需插入主键
+            insertClause.append("INSERT (").append(StringUtils.join(primaryKeys, ", "))
+                    .append(") VALUES (T2.")
+                    .append(StringUtils.join(primaryKeys, ", T2."))
+                    .append(")");
+        }
+
+        // 组装完整的 MERGE INTO 语句
+        StringBuilder mergeSql = new StringBuilder();
+        mergeSql.append("MERGE INTO ").append(table).append(" T1 ");
+        mergeSql.append("USING ").append(usingClause).append(" ");
+        mergeSql.append("ON (").append(onClause).append(") ");
+
+        if (updateSetClause.length() > 0) {
+            mergeSql.append("WHEN MATCHED THEN UPDATE SET ").append(updateSetClause).append(" ");
+        }
+        mergeSql.append("WHEN NOT MATCHED THEN ").append(insertClause);
+
+        return mergeSql.toString();
     }
 
     public static void preCheckPrePareSQL(Configuration originalConfig, DataBaseType type) {

@@ -1,0 +1,17 @@
+{
+    "name": "dmwriter",
+    "parameter": {
+        "username": "",
+        "password": "",
+        "writeMode": "",
+        "column": [],
+        "session": [],
+        "preSql": [],
+        "connection": [
+            {
+                "jdbcUrl": "jdbc:dm://host:5236/database",
+                "table": []
+            }
+        ]
+    }
+}
